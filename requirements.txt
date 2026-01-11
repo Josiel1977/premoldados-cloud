@@ -1,4 +1,9 @@
 dash
+dash-bootstrap-components
 plotly
 pandas
+numpy
 gunicorn
+requests
+reportlab
+xlsxwriter
