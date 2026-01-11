@@ -1,98 +1,41 @@
 import os
 import sqlite3
-import requests
 import pandas as pd
-import dash
-from dash import html, dcc
-import dash_bootstrap_components as dbc
+from dash import Dash, html, dcc
 import plotly.express as px
 
-# =============================
-# CONFIG
-# =============================
-DB_FILE = "production_history.db"
-GITHUB_RAW_URL = os.getenv(
-    "GITHUB_RAW_URL",
-    "https://raw.githubusercontent.com/SEU_USUARIO/SEU_REPO/main/production_history.db"
-)
+DB_PATH = "production_history.db"
 
-# =============================
-# BAIXAR BANCO
-# =============================
-def download_db():
-    try:
-        r = requests.get(GITHUB_RAW_URL, timeout=20)
-        r.raise_for_status()
-        with open(DB_FILE, "wb") as f:
-            f.write(r.content)
-        print("✅ Banco baixado com sucesso")
-    except Exception as e:
-        print("⚠️ Falha ao baixar banco:", e)
+app = Dash(__name__)
+server = app.server
 
-download_db()
-
-# =============================
-# LER DADOS
-# =============================
 def load_data():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        df = pd.read_sql("SELECT * FROM production_cycles", conn)
-        conn.close()
-        return df
-    except Exception as e:
-        print("Erro ao ler banco:", e)
-        return pd.DataFrame()
+    if not os.path.exists(DB_PATH):
+        return pd.DataFrame(columns=["timestamp", "setor", "volume_m3"])
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql("SELECT timestamp, setor, volume_m3 FROM production_cycles", conn)
+    conn.close()
+    return df
 
-df = load_data()
+app.layout = html.Div([
+    html.H2("🏭 Central da Estrutura — Cloud"),
+    dcc.Interval(id="refresh", interval=30_000, n_intervals=0),
+    dcc.Graph(id="grafico")
+])
 
-# =============================
-# DASH APP
-# =============================
-app = dash.Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.DARKLY],
-    title="Central da Estrutura (Cloud)"
+@app.callback(
+    dcc.Output("grafico", "figure"),
+    dcc.Input("refresh", "n_intervals")
 )
-
-server = app.server  # 👈 ESSENCIAL PARA O RAILWAY
-
-# =============================
-# LAYOUT
-# =============================
-if df.empty:
-    content = dbc.Alert("Nenhum dado disponível.", color="warning")
-else:
-    fig = px.bar(
-        df.groupby("setor", as_index=False)["volume_m3"].sum(),
-        x="setor",
-        y="volume_m3",
-        title="Volume Produzido por Setor (m³)"
-    )
-    fig.update_layout(
-        plot_bgcolor="#222",
-        paper_bgcolor="#222",
-        font_color="white"
+def atualizar(_):
+    df = load_data()
+    if df.empty:
+        return px.bar(title="Sem dados ainda")
+    return px.bar(
+        df.groupby("setor")["volume_m3"].sum().reset_index(),
+        x="setor", y="volume_m3",
+        title="Produção acumulada por setor (m³)"
     )
 
-    content = dcc.Graph(figure=fig)
-
-app.layout = dbc.Container(
-    [
-        html.H2("🏭 Central da Estrutura – Cloud", className="text-center my-3"),
-        html.P("Visualização em nuvem (somente leitura)", className="text-center text-muted"),
-        html.Hr(),
-        content
-    ],
-    fluid=True
-)
-
-# =============================
-# RUN LOCAL
-# =============================
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8050)))
